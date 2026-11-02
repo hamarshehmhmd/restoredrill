@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "restoredrill"
+version = "0.1.0"
+description = "Prove your Postgres backups actually restore: restore the latest dump into a throwaway server, run smoke checks, fail CI when it breaks."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Mohammad Hamarsheh" }]
+requires-python = ">=3.9"
+keywords = ["postgres", "postgresql", "backup", "restore", "pg_dump", "pg_restore", "disaster-recovery", "devops", "soc2"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Topic :: Database",
+  "Topic :: System :: Archiving :: Backup",
+  "Topic :: System :: Recovery Tools",
+]
+dependencies = ['tomli>=1.1; python_version < "3.11"']
+
+[project.urls]
+Homepage = "https://github.com/hamarshehmhmd/restoredrill"
+Issues = "https://github.com/hamarshehmhmd/restoredrill/issues"
+
+[project.scripts]
+restoredrill = "restoredrill.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]

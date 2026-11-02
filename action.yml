@@ -1,0 +1,53 @@
+name: restoredrill
+description: Restore your latest Postgres backup into a throwaway server, run smoke checks, and fail when it doesn't come back.
+author: Mohammad Hamarsheh
+branding:
+  icon: database
+  color: green
+inputs:
+  backup:
+    description: Backup path or glob (newest match wins). Optional if restoredrill.toml sets backup or fetch.
+    required: false
+    default: ""
+  config:
+    description: Path to restoredrill.toml
+    required: false
+    default: ""
+  args:
+    description: Extra arguments for `restoredrill run` (e.g. --role app --max-age 26)
+    required: false
+    default: ""
+  python-version:
+    description: Python used to run restoredrill
+    required: false
+    default: "3.12"
+outputs:
+  status:
+    description: pass, fail or error
+    value: ${{ steps.drill.outputs.status }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - shell: bash
+      run: python -m pip install -q "${{ github.action_path }}"
+    - id: drill
+      shell: bash
+      env:
+        RD_BACKUP: ${{ inputs.backup }}
+        RD_CONFIG: ${{ inputs.config }}
+        RD_ARGS: ${{ inputs.args }}
+      run: |
+        set +e
+        cmd=(restoredrill run --color always)
+        [ -n "$RD_BACKUP" ] && cmd+=("$RD_BACKUP")
+        [ -n "$RD_CONFIG" ] && cmd+=(-c "$RD_CONFIG")
+        # shellcheck disable=SC2206
+        [ -n "$RD_ARGS" ] && cmd+=($RD_ARGS)
+        "${cmd[@]}" --junit restoredrill-junit.xml
+        rc=$?
+        case $rc in 0) s=pass;; 1) s=fail;; *) s=error;; esac
+        echo "status=$s" >> "$GITHUB_OUTPUT"
+        exit $rc

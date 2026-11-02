@@ -1,0 +1,91 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  unit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install . pytest
+      - run: pytest -q -rs
+        env:
+          RESTOREDRILL_PG_BIN: /nonexistent  # integration tests run in the next job
+
+  integration:
+    name: real restores (Postgres 15 + 17)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install Postgres 15 and 17 from PGDG
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-15 postgresql-17
+          sudo systemctl stop postgresql || true
+      - run: pip install . pytest
+      - name: pytest (integration tests must run, not skip)
+        env:
+          RESTOREDRILL_PG_BIN: /usr/lib/postgresql/17/bin:/usr/lib/postgresql/15/bin
+        run: |
+          restoredrill doctor
+          pytest -q -rs | tee out.txt
+          if grep -q "SKIPPED" out.txt; then echo "integration tests were skipped"; exit 1; fi
+
+  docker-engine:
+    name: docker engine end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - name: make a real dump from a Postgres 16 container
+        run: |
+          docker run -d --name src -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16
+          until docker exec src pg_isready -h 127.0.0.1 -U postgres; do sleep 1; done
+          docker exec src psql -U postgres -h 127.0.0.1 -c "create role app" -c "create database shop owner app"
+          docker exec src psql -U postgres -h 127.0.0.1 -d shop -c "set role app" -c "create table users(id int, email text)" -c "insert into users select g, 'u'||g from generate_series(1,100) g"
+          docker exec src pg_dump -U postgres -h 127.0.0.1 -Fc -d shop -f /tmp/shop.dump
+          docker cp src:/tmp/shop.dump shop.dump
+      - name: missing role is caught (expect exit 1)
+        run: |
+          set +e; restoredrill run shop.dump --engine docker; rc=$?; set -e
+          test "$rc" = 1
+      - name: passes with the role
+        run: restoredrill run shop.dump --engine docker --role app --expect-table public.users:100
+
+  action:
+    name: GitHub Action (uses ./)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: make a dump
+        run: |
+          docker run -d --name src -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17
+          until docker exec src pg_isready -h 127.0.0.1 -U postgres; do sleep 1; done
+          docker exec src psql -U postgres -h 127.0.0.1 -c "create table t(id int)" -c "insert into t select generate_series(1,10)"
+          docker exec src pg_dump -U postgres -h 127.0.0.1 -f /tmp/db.sql
+          mkdir backups && docker cp src:/tmp/db.sql backups/db.sql
+      - id: drill
+        uses: ./
+        with:
+          backup: backups/*.sql
+          args: --expect-table public.t:10 --max-age 1
+      - run: test "${{ steps.drill.outputs.status }}" = pass
+
+  install-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: RESTOREDRILL_REF=${{ github.sha }} sh install.sh
+      - run: ~/.local/bin/restoredrill --version || restoredrill --version

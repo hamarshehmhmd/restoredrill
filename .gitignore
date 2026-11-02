@@ -1,0 +1,10 @@
+launch/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+demo/build/
+demo.mp4
+.pytest_cache/
